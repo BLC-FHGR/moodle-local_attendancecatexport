@@ -1,0 +1,111 @@
+# Attendance category export (local_attendancecatexport)
+
+Exports the attendance of all courses in a Moodle course category (optionally including its
+subcategories) into a single spreadsheet, with one row per course and participant.
+
+It is intended for programmes with a mandatory minimum attendance (for example 80 %), where each
+course corresponds to one module. Managers and programme leads can check the attendance of all
+modules at once instead of opening the attendance report of every single course.
+
+## Requirements
+
+- Moodle 5.2
+- [mod_attendance](https://moodle.org/plugins/mod_attendance) (version 2026042102 or later)
+
+## Installation
+
+1. Copy the plugin to `local/attendancecatexport` in your Moodle code (on Moodle 5.x with the
+   `public/` directory layout: `public/local/attendancecatexport`).
+2. Visit *Site administration > Notifications* to complete the installation.
+
+Alternatively, install the ZIP file via *Site administration > Plugins > Install plugins*.
+
+## Permission
+
+The plugin defines no capability of its own. It uses the existing capability
+`mod/attendance:viewsummaryreports` of mod_attendance, checked in the **course category context**.
+By default this capability is granted to the *Manager* role. To give programme leads access, assign
+them a role with this capability in the respective course category.
+
+## Usage
+
+1. Open the course category and choose **Attendance export** in the category's *More* menu
+   (`/local/attendancecatexport/export.php?categoryid=<id>`).
+2. Choose the options:
+   - **Include subcategories** (default: yes)
+   - **Threshold (%)** (default: 80)
+   - **Percentage basis**: *All sessions* (default) or *Taken sessions*
+   - **Format**: Excel (xlsx), CSV or ODS (only enabled data formats are listed)
+3. Click **Download**.
+
+Each download is logged with the event `\local_attendancecatexport\event\report_exported`.
+
+## Columns
+
+| Column | Description |
+| --- | --- |
+| Course category | Category of the course, including its parent categories (e.g. `Programme / Year 1`). |
+| Course short name | Short name of the course. |
+| Course full name | Full name of the course. |
+| Last name | Last name of the participant. |
+| First name | First name of the participant. |
+| Email address | Email address of the participant. |
+| ID number | ID number of the participant's user account. |
+| Taken sessions | Number of taken sessions in which the participant has a status. |
+| Total sessions | Number of all sessions relevant for the participant (common sessions plus sessions of the participant's groups), including sessions not yet taken. |
+| Points | Points achieved in the taken sessions. |
+| Max. points | Maximum points, depending on the selected basis: of all sessions (*All sessions*) or of the taken sessions only (*Taken sessions*). |
+| % taken sessions | Points / maximum points of the taken sessions, in percent (2 decimals). |
+| % all sessions | Points / maximum points of all sessions, in percent (2 decimals). |
+| Threshold met | *Yes* if the percentage of the selected basis is at least the threshold, otherwise *No*. |
+
+## Calculation
+
+The values match the attendance report of the activity (*Report > Summary*), because the plugin
+uses the same calculation as `mod_attendance_summary`:
+
+- The maximum points of a session are the highest grade of the session's status set. Only visible
+  and non-deleted statuses are considered.
+- Only sessions on or after the course start date are counted.
+- In group mode, a participant is counted for common sessions and for sessions of their own groups.
+  Without group mode, group sessions are ignored.
+
+The calculation is reimplemented with batched queries (a fixed number of queries per attendance
+activity and one group membership query per course) rather than calling `mod_attendance_summary`
+per participant, which would run one group query per participant. The PHPUnit tests compare the
+results with `mod_attendance_summary`.
+
+Further rules:
+
+- **Several attendance activities in one course** are aggregated: points and maximum points are
+  summed over all activities, and the percentages are computed from these sums (percentages are
+  not averaged).
+- **Participants** are the users listed by the attendance activity: users with the capability
+  `mod/attendance:canbelisted` in the activity context, restricted to the groups of the activity's
+  grouping if one is set. Only **active enrolments** are considered (unlike the activity report,
+  which also lists suspended enrolments). Temporary users of mod_attendance are not exported.
+- **Courses without an attendance activity** are skipped. Hidden attendance activities are included.
+- Hidden courses and categories are only included if the user may view them.
+
+## Privacy
+
+The plugin does not store any personal data (null privacy provider). It only exports data stored by
+mod_attendance.
+
+## Development
+
+Run the PHPUnit tests from the Moodle root:
+
+```bash
+vendor/bin/phpunit --testsuite local_attendancecatexport_testsuite
+```
+
+Check the coding style with [moodle-plugin-ci](https://moodlehq.github.io/moodle-plugin-ci/):
+
+```bash
+moodle-plugin-ci phpcs --max-warnings 0 local/attendancecatexport
+```
+
+## License
+
+GNU GPL v3 or later. See <http://www.gnu.org/copyleft/gpl.html>.
