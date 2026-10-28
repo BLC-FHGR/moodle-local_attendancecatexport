@@ -213,7 +213,7 @@ class report {
         $yes = get_string('yes');
         $no = get_string('no');
         foreach ($this->get_courses() as $course) {
-            $summaries = $this->get_course_summaries($course->id);
+            $summaries = $this->get_course_summaries($course);
             if (empty($summaries)) {
                 continue;
             }
@@ -307,16 +307,26 @@ class report {
      * numallsessions, numpastsessions (sessions that have already started), points, takenmaxpoints,
      * allmaxpoints, takenpercentage, allpercentage (percentages as fractions between 0 and 1).
      *
-     * @param int $courseid The course id.
+     * @param int|\core_course_list_element $course The course id, or the course from {@see get_courses()},
+     *                                             which saves a query per course.
      * @return stdClass[] Summaries indexed by user id, sorted by last name and first name. Empty if the
      *                    course has no attendance instance.
      */
-    public function get_course_summaries(int $courseid): array {
+    public function get_course_summaries(int|\core_course_list_element $course): array {
         global $CFG;
         require_once($CFG->dirroot . '/mod/attendance/locallib.php');
 
-        $modinfo = get_fast_modinfo($courseid);
-        $course = $modinfo->get_course();
+        if ($course instanceof \core_course_list_element) {
+            // With cacherev, get_fast_modinfo() takes the course from its cache instead of the database.
+            $courseid = (int) $course->id;
+            $modinfo = get_fast_modinfo((object) ['id' => $courseid, 'cacherev' => $course->cacherev]);
+            $startdate = (int) $course->startdate;
+        } else {
+            $courseid = $course;
+            $modinfo = get_fast_modinfo($courseid);
+            // Not $modinfo->get_course(): a cached modinfo may hold a partial course record without startdate.
+            $startdate = (int) get_course($courseid)->startdate;
+        }
 
         $summaries = [];
         $usergroups = null;
@@ -331,10 +341,10 @@ class report {
 
             // Same condition as mod_attendance_summary::with_groups().
             $withgroups = $cm->effectivegroupmode > 0;
-            $userspoints = $this->get_users_points($cm->instance, $course->startdate, $withgroups);
-            $maxpointsbygroup = $this->get_maxpoints_by_group($cm->instance, $course->startdate, $withgroups);
+            $userspoints = $this->get_users_points($cm->instance, $startdate, $withgroups);
+            $maxpointsbygroup = $this->get_maxpoints_by_group($cm->instance, $startdate, $withgroups);
             if ($withgroups && $usergroups === null) {
-                $usergroups = $this->get_user_groups($course->id);
+                $usergroups = $this->get_user_groups($courseid);
             }
 
             foreach ($users as $userid => $user) {

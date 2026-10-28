@@ -98,11 +98,16 @@ final class report_test extends \advanced_testcase {
 
         $this->assert_matches_mod_attendance($course->id, $summaries);
 
+        // get_rows() caches the course modinfo with a partial course record (without start date).
+        get_fast_modinfo(0, 0, true);
         $rows = iterator_to_array($report->get_rows(), false);
         $this->assertCount(1, $rows);
         $this->assertEquals(80.0, $rows[0]['percenttaken']);
         $this->assertEquals(66.67, $rows[0]['percentall']);
         $this->assertEquals(12, $rows[0]['maxpoints']);
+
+        // The course start date must still be applied when the summaries are computed afterwards.
+        $this->assertEquals($summaries, $report->get_course_summaries($course->id));
     }
 
     /**
@@ -628,12 +633,12 @@ final class report_test extends \advanced_testcase {
             /**
              * Records the course id and computes the summaries.
              *
-             * @param int $courseid The course id.
+             * @param int|\core_course_list_element $course The course.
              * @return stdClass[]
              */
-            public function get_course_summaries(int $courseid): array {
-                $this->loadedcourseids[] = $courseid;
-                return parent::get_course_summaries($courseid);
+            public function get_course_summaries(int|\core_course_list_element $course): array {
+                $this->loadedcourseids[] = is_int($course) ? $course : (int) $course->id;
+                return parent::get_course_summaries($course);
             }
         };
 
