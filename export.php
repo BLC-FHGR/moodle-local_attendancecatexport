@@ -47,7 +47,8 @@ $PAGE->set_heading($category->get_formatted_name());
 $form = new export_form($url, ['categoryid' => $category->id]);
 
 if ($data = $form->get_data()) {
-    $report = new report($category, !empty($data->includesubcategories), (float) $data->threshold, $data->basis);
+    $filters = export_form::get_filters($data);
+    $report = new report($category, !empty($data->includesubcategories), (float) $data->threshold, $data->basis, $filters);
 
     \local_attendancecatexport\event\report_exported::create([
         'context' => $context,
@@ -56,7 +57,7 @@ if ($data = $form->get_data()) {
             'threshold' => (float) $data->threshold,
             'basis' => $data->basis,
             'dataformat' => $data->dataformat,
-        ],
+        ] + $filters,
     ])->trigger();
 
     $filename = clean_filename(get_string('exportfilename', 'local_attendancecatexport', [

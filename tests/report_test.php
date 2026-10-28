@@ -234,6 +234,188 @@ final class report_test extends \advanced_testcase {
     }
 
     /**
+     * Data provider for {@see test_course_filters()}.
+     *
+     * Courses: A (2026-01-10 to 2026-06-30), B (2026-03-01, no end date), C (2026-09-01 to 2027-01-31)
+     * and the hidden course H (2026-03-01 to 2026-07-31).
+     *
+     * @return array
+     */
+    public static function course_filters_provider(): array {
+        return [
+            'no filters, hidden courses excluded' => [[], ['A', 'B', 'C']],
+            'hidden courses included' => [['includehidden' => true], ['A', 'B', 'C', 'H']],
+            'start from' => [['startfrom' => '2026-02-01'], ['B', 'C']],
+            'start to, bound inclusive' => [['startto' => '2026-03-01'], ['A', 'B']],
+            'start from and to' => [['startfrom' => '2026-02-01', 'startto' => '2026-06-30'], ['B']],
+            'start from and to, hidden included' => [
+                ['startfrom' => '2026-02-01', 'startto' => '2026-06-30', 'includehidden' => true],
+                ['B', 'H'],
+            ],
+            'end from, no end date included' => [['endfrom' => '2026-07-01'], ['B', 'C']],
+            'end to, no end date included' => [['endto' => '2026-06-30'], ['A', 'B']],
+            'end from and to, no end date included' => [['endfrom' => '2026-07-01', 'endto' => '2026-12-31'], ['B']],
+            'end from and to, hidden included' => [
+                ['endfrom' => '2026-07-01', 'endto' => '2026-12-31', 'includehidden' => true],
+                ['B', 'H'],
+            ],
+            'start and end combined' => [
+                ['startfrom' => '2026-01-01', 'startto' => '2026-06-30', 'endto' => '2026-06-30'],
+                ['A', 'B'],
+            ],
+            'all filters' => [
+                [
+                    'startfrom' => '2026-02-01',
+                    'startto' => '2026-12-31',
+                    'endfrom' => '2026-07-01',
+                    'endto' => '2027-12-31',
+                    'includehidden' => true,
+                ],
+                ['B', 'C', 'H'],
+            ],
+            'no match' => [['startfrom' => '2027-01-01'], []],
+        ];
+    }
+
+    /**
+     * Course filters on start date, end date and visibility are applied before attendance data is loaded.
+     *
+     * @dataProvider course_filters_provider
+     * @param array $filters Filters with dates as 'Y-m-d' (UTC).
+     * @param string[] $expected Expected course short names.
+     */
+    public function test_course_filters(array $filters, array $expected): void {
+        global $DB;
+        $generator = $this->getDataGenerator();
+        $category = $generator->create_category();
+        $courses = [
+            'A' => ['startdate' => '2026-01-10', 'enddate' => '2026-06-30', 'visible' => 1],
+            'B' => ['startdate' => '2026-03-01', 'enddate' => null, 'visible' => 1],
+            'C' => ['startdate' => '2026-09-01', 'enddate' => '2027-01-31', 'visible' => 1],
+            'H' => ['startdate' => '2026-03-01', 'enddate' => '2026-07-31', 'visible' => 0],
+        ];
+        $courseids = [];
+        foreach ($courses as $shortname => $data) {
+            $course = $generator->create_course([
+                'category' => $category->id,
+                'shortname' => $shortname,
+                'startdate' => self::utc_timestamp($data['startdate']),
+                'enddate' => $data['enddate'] ? self::utc_timestamp($data['enddate']) : 0,
+                'visible' => $data['visible'],
+            ]);
+            $generator->create_and_enrol($course, 'student');
+            $this->create_attendance($course);
+            $courseids[$shortname] = $course->id;
+        }
+        $this->assertEquals(0, $DB->get_field('course', 'enddate', ['id' => $courseids['B']]));
+
+        foreach ($filters as $key => $value) {
+            if (is_string($value)) {
+                $filters[$key] = self::utc_timestamp($value);
+            }
+        }
+
+        // Record the courses for which attendance data is loaded.
+        $report = new class (core_course_category::get($category->id), true, 80, report::BASIS_ALL, $filters) extends report {
+            /** @var int[] Ids of the courses for which summaries were computed. */
+            public array $loadedcourseids = [];
+
+            /**
+             * Records the course id and computes the summaries.
+             *
+             * @param int $courseid The course id.
+             * @return stdClass[]
+             */
+            public function get_course_summaries(int $courseid): array {
+                $this->loadedcourseids[] = $courseid;
+                return parent::get_course_summaries($courseid);
+            }
+        };
+
+        $shortnames = array_column(iterator_to_array($report->get_rows(), false), 'courseshortname');
+        sort($shortnames);
+        $this->assertEquals($expected, $shortnames);
+
+        $expectedids = array_map(fn($shortname) => $courseids[$shortname], $expected);
+        $loadedids = $report->loadedcourseids;
+        sort($expectedids);
+        sort($loadedids);
+        $this->assertEquals($expectedids, $loadedids);
+    }
+
+    /**
+     * Unknown filters are rejected.
+     */
+    public function test_unknown_filter(): void {
+        $category = core_course_category::get($this->getDataGenerator()->create_category()->id);
+        $this->expectException(\coding_exception::class);
+        new report($category, true, 80, report::BASIS_ALL, ['visible' => 1]);
+    }
+
+    /**
+     * The form rejects "from" dates after "to" dates.
+     *
+     * @covers \local_attendancecatexport\form\export_form
+     */
+    public function test_form_validation(): void {
+        $category = $this->getDataGenerator()->create_category();
+        $url = new \moodle_url('/local/attendancecatexport/export.php', ['categoryid' => $category->id]);
+        $form = new form\export_form($url, ['categoryid' => $category->id]);
+        $data = [
+            'categoryid' => $category->id,
+            'includesubcategories' => 1,
+            'threshold' => 80,
+            'basis' => report::BASIS_ALL,
+            'dataformat' => 'csv',
+            'startfrom' => 0,
+            'startto' => 0,
+            'endfrom' => 0,
+            'endto' => 0,
+            'includehidden' => 0,
+        ];
+        $day = self::utc_timestamp('2026-03-01');
+
+        $this->assertEquals([], $form->validation($data, []));
+        $this->assertEquals([], $form->validation(['startfrom' => $day + DAYSECS, 'endto' => $day] + $data, []));
+        $this->assertEquals([], $form->validation(['startfrom' => $day, 'startto' => $day] + $data, []));
+
+        $errors = $form->validation(['startfrom' => $day + DAYSECS, 'startto' => $day] + $data, []);
+        $this->assertEquals(['startto'], array_keys($errors));
+
+        $errors = $form->validation(['endfrom' => $day + DAYSECS, 'endto' => $day] + $data, []);
+        $this->assertEquals(['endto'], array_keys($errors));
+    }
+
+    /**
+     * "To" dates of the form include the whole day in the user's timezone, also on DST changes.
+     *
+     * @covers \local_attendancecatexport\form\export_form
+     */
+    public function test_form_filters(): void {
+        $this->setTimezone('Europe/Zurich');
+
+        // 2026-03-29 has 23 hours in Europe/Zurich.
+        $from = make_timestamp(2026, 3, 1);
+        $to = make_timestamp(2026, 3, 29);
+        $filters = form\export_form::get_filters((object) [
+            'startfrom' => $from,
+            'startto' => $to,
+            'endfrom' => 0,
+            'endto' => 0,
+            'includehidden' => 1,
+        ]);
+
+        $this->assertEquals([
+            'startfrom' => $from,
+            'startto' => make_timestamp(2026, 3, 30) - 1,
+            'endfrom' => 0,
+            'endto' => 0,
+            'includehidden' => true,
+        ], $filters);
+        $this->assertNotEquals($to + DAYSECS - 1, $filters['startto']);
+    }
+
+    /**
      * Export and navigation link require mod/attendance:viewsummaryreports in the category context.
      */
     public function test_capability(): void {
@@ -283,6 +465,11 @@ final class report_test extends \advanced_testcase {
                 'threshold' => 80.0,
                 'basis' => report::BASIS_ALL,
                 'dataformat' => 'csv',
+                'startfrom' => 1767225600,
+                'startto' => 0,
+                'endfrom' => 0,
+                'endto' => 1798761599,
+                'includehidden' => false,
             ],
         ])->trigger();
         $events = $sink->get_events();
@@ -293,6 +480,9 @@ final class report_test extends \advanced_testcase {
         $this->assertInstanceOf(event\report_exported::class, $event);
         $this->assertEquals($context, $event->get_context());
         $this->assertEquals('csv', $event->other['dataformat']);
+        $this->assertEquals(1767225600, $event->other['startfrom']);
+        $this->assertEquals(1798761599, $event->other['endto']);
+        $this->assertFalse($event->other['includehidden']);
         $this->assertEquals(
             new \moodle_url('/local/attendancecatexport/export.php', ['categoryid' => $category->id]),
             $event->get_url()
@@ -323,6 +513,16 @@ final class report_test extends \advanced_testcase {
             $this->assertEqualsWithDelta($expected['takenmax'], $summary->takenmaxpoints, 0.001);
             $this->assertEqualsWithDelta($expected['allmax'], $summary->allmaxpoints, 0.001);
         }
+    }
+
+    /**
+     * Converts a date in the format 'Y-m-d' (UTC midnight) to a timestamp.
+     *
+     * @param string $date The date.
+     * @return int
+     */
+    protected static function utc_timestamp(string $date): int {
+        return (new \DateTimeImmutable($date, new \DateTimeZone('UTC')))->getTimestamp();
     }
 
     /**

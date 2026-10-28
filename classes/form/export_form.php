@@ -21,6 +21,7 @@ defined('MOODLE_INTERNAL') || die();
 require_once($CFG->libdir . '/formslib.php');
 
 use local_attendancecatexport\report;
+use stdClass;
 
 /**
  * Export options form.
@@ -32,6 +33,9 @@ use local_attendancecatexport\report;
 class export_form extends \moodleform {
     /** @var string[] Data formats offered by the form (dataformat plugin names). */
     public const DATAFORMATS = ['excel', 'csv', 'ods'];
+
+    /** @var string[] Optional date filters on the course start and end date. */
+    public const DATEFILTERS = ['startfrom', 'startto', 'endfrom', 'endto'];
 
     /**
      * Form definition.
@@ -64,6 +68,17 @@ class export_form extends \moodleform {
             self::get_dataformat_options()
         );
 
+        $mform->addElement('header', 'coursefilters', get_string('coursefilters', 'local_attendancecatexport'));
+        $mform->setExpanded('coursefilters', true);
+
+        foreach (self::DATEFILTERS as $name) {
+            $mform->addElement('date_selector', $name, get_string($name, 'local_attendancecatexport'), ['optional' => true]);
+        }
+        $mform->addHelpButton('endfrom', 'endfrom', 'local_attendancecatexport');
+
+        $mform->addElement('advcheckbox', 'includehidden', get_string('includehidden', 'local_attendancecatexport'));
+        $mform->setDefault('includehidden', 0);
+
         $this->add_action_buttons(false, get_string('download'));
     }
 
@@ -82,7 +97,48 @@ class export_form extends \moodleform {
         if (!array_key_exists($data['dataformat'], self::get_dataformat_options())) {
             $errors['dataformat'] = get_string('required');
         }
+        foreach (['startfrom' => 'startto', 'endfrom' => 'endto'] as $from => $to) {
+            if (!empty($data[$from]) && !empty($data[$to]) && $data[$from] > $data[$to]) {
+                $errors[$to] = get_string('errordaterange', 'local_attendancecatexport');
+            }
+        }
         return $errors;
+    }
+
+    /**
+     * Converts the submitted form data into course filters for {@see report}.
+     *
+     * The date selectors return midnight of the selected day; "to" dates are extended to the end of
+     * that day in the user's timezone so that the whole day is included.
+     *
+     * @param stdClass $data Submitted form data.
+     * @return array Course filters, see {@see report::DEFAULT_FILTERS}.
+     */
+    public static function get_filters(stdClass $data): array {
+        return [
+            'startfrom' => (int) ($data->startfrom ?? 0),
+            'startto' => self::end_of_day((int) ($data->startto ?? 0)),
+            'endfrom' => (int) ($data->endfrom ?? 0),
+            'endto' => self::end_of_day((int) ($data->endto ?? 0)),
+            'includehidden' => !empty($data->includehidden),
+        ];
+    }
+
+    /**
+     * Returns the last second of the day of the given timestamp in the user's timezone.
+     *
+     * @param int $timestamp The timestamp, 0 for none.
+     * @return int The end of the day, or 0 if no timestamp was given.
+     */
+    public static function end_of_day(int $timestamp): int {
+        if (!$timestamp) {
+            return 0;
+        }
+        $date = new \DateTime('@' . $timestamp);
+        $date->setTimezone(\core_date::get_user_timezone_object());
+        $date->setTime(0, 0);
+        $date->modify('+1 day');
+        return $date->getTimestamp() - 1;
     }
 
     /**

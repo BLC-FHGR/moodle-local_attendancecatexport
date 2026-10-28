@@ -26,6 +26,11 @@ namespace local_attendancecatexport\event;
  *      - float threshold: threshold in percent.
  *      - string basis: percentage basis ("all" or "taken").
  *      - string dataformat: the data format used.
+ *      - int startfrom: course start date filter "from" (timestamp, 0 = not set).
+ *      - int startto: course start date filter "to" (timestamp, 0 = not set).
+ *      - int endfrom: course end date filter "from" (timestamp, 0 = not set).
+ *      - int endto: course end date filter "to" (timestamp, 0 = not set).
+ *      - bool includehidden: whether hidden courses were included.
  * }
  *
  * @package    local_attendancecatexport
@@ -79,7 +84,9 @@ class report_exported extends \core\event\base {
         if ($this->contextlevel != CONTEXT_COURSECAT) {
             throw new \coding_exception('Context level must be CONTEXT_COURSECAT.');
         }
-        foreach (['includesubcategories', 'threshold', 'basis', 'dataformat'] as $key) {
+        $keys = ['includesubcategories', 'threshold', 'basis', 'dataformat', 'startfrom', 'startto', 'endfrom', 'endto',
+            'includehidden'];
+        foreach ($keys as $key) {
             if (!isset($this->other[$key])) {
                 throw new \coding_exception("The '$key' value must be set in other.");
             }

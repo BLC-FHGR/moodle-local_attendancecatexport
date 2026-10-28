@@ -57,8 +57,29 @@ class report {
     /** @var string One of the BASIS_* constants. */
     protected string $basis;
 
+    /** @var array Course filters, see {@see self::DEFAULT_FILTERS}. */
+    protected array $filters;
+
     /** @var string[] Cache of nested category names, indexed by category id. */
     protected array $categorynames = [];
+
+    /**
+     * Default course filters.
+     *
+     * Date bounds are inclusive timestamps, 0 disables the bound:
+     * - startfrom / startto: range of course.startdate.
+     * - endfrom / endto: range of course.enddate. Courses without end date (0) always match.
+     * - includehidden: whether hidden courses (course.visible = 0) are included.
+     *
+     * @var array
+     */
+    public const DEFAULT_FILTERS = [
+        'startfrom' => 0,
+        'startto' => 0,
+        'endfrom' => 0,
+        'endto' => 0,
+        'includehidden' => false,
+    ];
 
     /**
      * Constructor.
@@ -67,20 +88,27 @@ class report {
      * @param bool $includesubcategories Whether courses of subcategories are included.
      * @param float $threshold Threshold in percent (0-100).
      * @param string $basis One of the BASIS_* constants.
+     * @param array $filters Course filters, see {@see self::DEFAULT_FILTERS}.
      */
     public function __construct(
         core_course_category $category,
         bool $includesubcategories = true,
         float $threshold = 80,
-        string $basis = self::BASIS_ALL
+        string $basis = self::BASIS_ALL,
+        array $filters = []
     ) {
         if (!in_array($basis, [self::BASIS_ALL, self::BASIS_TAKEN])) {
             throw new \coding_exception('Invalid basis: ' . $basis);
+        }
+        $unknown = array_diff_key($filters, self::DEFAULT_FILTERS);
+        if ($unknown) {
+            throw new \coding_exception('Unknown filters: ' . implode(', ', array_keys($unknown)));
         }
         $this->category = $category;
         $this->includesubcategories = $includesubcategories;
         $this->threshold = $threshold;
         $this->basis = $basis;
+        $this->filters = $filters + self::DEFAULT_FILTERS;
     }
 
     /**
@@ -103,12 +131,45 @@ class report {
     }
 
     /**
-     * Returns the courses to export.
+     * Returns the courses to export, with the course filters applied.
+     *
+     * Filtering uses the course fields cached by core_course_category, so no attendance data is loaded
+     * for courses that are filtered out.
      *
      * @return \core_course_list_element[]
      */
     public function get_courses(): array {
-        return $this->category->get_courses(['recursive' => $this->includesubcategories]);
+        $courses = $this->category->get_courses(['recursive' => $this->includesubcategories]);
+        return array_filter($courses, [$this, 'course_matches_filters']);
+    }
+
+    /**
+     * Whether a course matches the course filters.
+     *
+     * @param \core_course_list_element $course The course.
+     * @return bool
+     */
+    protected function course_matches_filters(\core_course_list_element $course): bool {
+        $filters = $this->filters;
+        if (!$filters['includehidden'] && !$course->visible) {
+            return false;
+        }
+        if ($filters['startfrom'] && $course->startdate < $filters['startfrom']) {
+            return false;
+        }
+        if ($filters['startto'] && $course->startdate > $filters['startto']) {
+            return false;
+        }
+        // Courses without end date are considered ongoing and always match the end date filters.
+        if ($course->enddate) {
+            if ($filters['endfrom'] && $course->enddate < $filters['endfrom']) {
+                return false;
+            }
+            if ($filters['endto'] && $course->enddate > $filters['endto']) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

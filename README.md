@@ -36,9 +36,25 @@ them a role with this capability in the respective course category.
    - **Threshold (%)** (default: 80)
    - **Percentage basis**: *All sessions* (default) or *Taken sessions*
    - **Format**: Excel (xlsx), CSV or ODS (only enabled data formats are listed)
-3. Click **Download**.
+3. Optionally restrict the courses in the **Course filters** section (see below).
+4. Click **Download**.
 
-Each download is logged with the event `\local_attendancecatexport\event\report_exported`.
+Each download is logged with the event `\local_attendancecatexport\event\report_exported`, including
+all selected options and course filters.
+
+### Course filters
+
+| Filter | Description |
+| --- | --- |
+| Course start date from / to | Only courses whose start date lies within the range. |
+| Course end date from / to | Only courses whose end date lies within the range. Courses without an end date are considered ongoing and are always included. |
+| Include hidden courses | Hidden courses are excluded by default. If checked, hidden courses are included (as far as the user may view them). |
+
+- Each date filter is optional and has to be enabled with its *Enable* checkbox.
+- Both bounds are inclusive: "to" covers the whole selected day in the user's timezone.
+- The "from" date must not be after the "to" date.
+- The filters are applied to the course list before any attendance data is loaded, so filtered-out
+  courses do not cause any additional database load.
 
 ## Columns
 
@@ -85,7 +101,7 @@ Further rules:
   grouping if one is set. Only **active enrolments** are considered (unlike the activity report,
   which also lists suspended enrolments). Temporary users of mod_attendance are not exported.
 - **Courses without an attendance activity** are skipped. Hidden attendance activities are included.
-- Hidden courses and categories are only included if the user may view them.
+- Hidden categories are only included if the user may view them.
 
 ## Privacy
 
