@@ -183,20 +183,61 @@ final class report_test extends \advanced_testcase {
     }
 
     /**
-     * Only participants listed by mod_attendance with an active enrolment are exported.
+     * Only participants listed by mod_attendance with an active enrolment and account are exported.
      */
     public function test_only_listed_active_participants(): void {
         $generator = $this->getDataGenerator();
         $category = $generator->create_category();
         $course = $generator->create_course(['category' => $category->id]);
         $student = $generator->create_and_enrol($course, 'student');
+        // Not listed: no mod/attendance:canbelisted.
         $generator->create_and_enrol($course, 'editingteacher');
-        $suspended = $generator->create_user();
-        $generator->enrol_user($suspended->id, $course->id, 'student', 'manual', 0, 0, ENROL_USER_SUSPENDED);
+        $nocapability = $generator->create_user();
+        $generator->enrol_user($nocapability->id, $course->id, $generator->create_role(['shortname' => 'nolist']));
+        // Not active: suspended enrolment, suspended account, expired and future enrolment.
+        $suspendedenrolment = $generator->create_user();
+        $generator->enrol_user($suspendedenrolment->id, $course->id, 'student', 'manual', 0, 0, ENROL_USER_SUSPENDED);
+        $suspendedaccount = $generator->create_user(['suspended' => 1]);
+        $generator->enrol_user($suspendedaccount->id, $course->id, 'student');
+        $expired = $generator->create_user();
+        $generator->enrol_user($expired->id, $course->id, 'student', 'manual', time() - 10 * DAYSECS, time() - DAYSECS);
+        $future = $generator->create_user();
+        $generator->enrol_user($future->id, $course->id, 'student', 'manual', time() + DAYSECS);
         $this->create_attendance($course);
 
         $report = new report(core_course_category::get($category->id));
         $this->assertEquals([$student->id], array_keys($report->get_course_summaries($course->id)));
+    }
+
+    /**
+     * Instances in which a participant is not listed do not count for that participant.
+     */
+    public function test_participant_listed_in_one_instance_only(): void {
+        global $DB;
+        $generator = $this->getDataGenerator();
+        $category = $generator->create_category();
+        $course = $generator->create_course(['category' => $category->id, 'startdate' => $this->coursestart]);
+        $student = $generator->create_and_enrol($course, 'student');
+
+        $listed = $this->create_attendance($course);
+        $sessionid = $this->add_session($listed->id, $this->coursestart + DAYSECS);
+        $this->add_log($sessionid, $student->id, $this->get_status($listed->id, 2));
+
+        $notlisted = $this->create_attendance($course);
+        $sessionid = $this->add_session($notlisted->id, $this->coursestart + DAYSECS);
+        $this->add_log($sessionid, $student->id, $this->get_status($notlisted->id, 0));
+        assign_capability(
+            'mod/attendance:canbelisted',
+            CAP_PROHIBIT,
+            $DB->get_field('role', 'id', ['shortname' => 'student']),
+            \context_module::instance($notlisted->cmid)->id
+        );
+
+        $summary = (new report(core_course_category::get($category->id)))->get_course_summaries($course->id)[$student->id];
+        $this->assertEquals(1, $summary->numtakensessions);
+        $this->assertEquals(1, $summary->numallsessions);
+        $this->assertEqualsWithDelta(2, $summary->points, 0.001);
+        $this->assertEqualsWithDelta(1, $summary->allpercentage, 0.0001);
     }
 
     /**

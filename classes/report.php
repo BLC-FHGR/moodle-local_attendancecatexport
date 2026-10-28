@@ -391,7 +391,8 @@ class report {
      *
      * Mirrors mod_attendance_structure::get_users(): users with mod/attendance:canbelisted in the module
      * context, restricted to the groups of the activity's grouping if one is set. Additionally, only
-     * active enrolments are considered and temporary users are ignored.
+     * active enrolments (active, started and not ended) of user accounts that are not suspended are
+     * considered, and temporary users are ignored.
      *
      * @param cm_info $cm The attendance course module.
      * @return stdClass[] Users (id, firstname, lastname, email, idnumber) indexed by id.
@@ -411,7 +412,8 @@ class report {
         );
         $sql = "SELECT u.id, u.firstname, u.lastname, u.email, u.idnumber
                   FROM {user} u
-                  JOIN ($enrolledsql) je ON je.id = u.id";
+                  JOIN ($enrolledsql) je ON je.id = u.id
+                 WHERE u.suspended = 0";
         return $DB->get_records_sql($sql, $params);
     }
 

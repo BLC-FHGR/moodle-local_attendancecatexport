@@ -124,8 +124,11 @@ Further rules:
   not averaged).
 - **Participants** are the users listed by the attendance activity: users with the capability
   `mod/attendance:canbelisted` in the activity context, restricted to the groups of the activity's
-  grouping if one is set. Only **active enrolments** are considered (unlike the activity report,
-  which also lists suspended enrolments). Temporary users of mod_attendance are not exported.
+  grouping if one is set. Unlike the activity report, only **active participants** are exported:
+  the enrolment must be active, already started and not ended, and the user account must not be
+  suspended. Temporary users of mod_attendance are not exported.
+- A participant only counts in the attendance activities in which they are listed; activities in which
+  they are not listed (e.g. because of a capability override) are ignored for them.
 - **Courses without an attendance activity** are skipped. Hidden attendance activities are included.
 - Hidden categories are only included if the user may view them.
 
