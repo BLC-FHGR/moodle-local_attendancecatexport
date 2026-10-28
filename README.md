@@ -138,7 +138,18 @@ Further rules:
 - A participant only counts in the attendance activities in which they are listed; activities in which
   they are not listed (e.g. because of a capability override) are ignored for them.
 - **Courses without an attendance activity** are skipped. Hidden attendance activities are included.
-- Hidden categories are only included if the user may view them.
+- Courses in hidden subcategories are treated like all other courses (access is controlled by the
+  capability, not by the category visibility). Note that Moodle creates courses in a hidden category
+  as hidden by default, so they are only exported with *Include hidden courses*.
+
+## Known limitations
+
+- The spreadsheet formats are written by Moodle core (`core\dataformat`). In Moodle 5.2, all values
+  including the numbers end up as text cells in Excel and ODS files, because core passes every value
+  through its formula escaping, which returns strings. Use CSV, or convert the columns in the
+  spreadsheet application, if you need to calculate with the numbers.
+- Values starting with `=`, `+`, `-` or `@` (e.g. in names) are prefixed with an apostrophe by
+  Moodle core to prevent formula injection.
 
 ## Privacy
 
