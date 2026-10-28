@@ -403,6 +403,55 @@ final class report_test extends \advanced_testcase {
     }
 
     /**
+     * Rows without maximum points (no sessions, or only statuses without points) have an undefined
+     * percentage: the threshold is not met, but they are not below the threshold either.
+     */
+    public function test_below_threshold_without_maximum_points(): void {
+        global $DB;
+        $generator = $this->getDataGenerator();
+        $category = $generator->create_category();
+
+        // Course with one taken session whose status set only contains a status without points.
+        $zero = $generator->create_course(['category' => $category->id, 'startdate' => $this->coursestart]);
+        $student = $generator->create_and_enrol($zero, 'student');
+        $att = $this->create_attendance($zero);
+        $statusid = $DB->insert_record('attendance_statuses', [
+            'attendanceid' => $att->id,
+            'acronym' => 'N',
+            'description' => 'No points',
+            'grade' => 0,
+            'setnumber' => 1,
+        ]);
+        $sessionid = $this->add_session($att->id, $this->coursestart + DAYSECS, 0, true, 1);
+        $this->add_log($sessionid, $student->id, $statusid);
+
+        // Course with an attendance activity without sessions.
+        $empty = $generator->create_course(['category' => $category->id, 'startdate' => $this->coursestart]);
+        $generator->create_and_enrol($empty, 'student');
+        $this->create_attendance($empty);
+
+        $category = core_course_category::get($category->id);
+        $summaries = (new report($category))->get_course_summaries($zero->id);
+        $this->assertEquals(1, $summaries[$student->id]->numtakensessions);
+        $this->assertEqualsWithDelta(0, $summaries[$student->id]->allmaxpoints, 0.001);
+        $this->assert_matches_mod_attendance($zero->id, $summaries);
+        $this->assert_matches_mod_attendance($empty->id, (new report($category))->get_course_summaries($empty->id));
+
+        foreach ([report::BASIS_ALL, report::BASIS_TAKEN] as $basis) {
+            $rows = iterator_to_array((new report($category, true, 80, $basis))->get_rows(), false);
+            $this->assertCount(2, $rows);
+            foreach ($rows as $row) {
+                $this->assertEquals(0, $row['maxpoints']);
+                $this->assertEquals(0, $row['percenttaken']);
+                $this->assertEquals(0, $row['percentall']);
+                $this->assertEquals(get_string('no'), $row['thresholdmet']);
+            }
+            $report = new report($category, true, 80, $basis, ['belowthresholdonly' => true]);
+            $this->assertCount(0, iterator_to_array($report->get_rows(), false));
+        }
+    }
+
+    /**
      * The filter "below threshold only" applies per course and participant.
      */
     public function test_below_threshold_per_row(): void {
@@ -776,9 +825,16 @@ final class report_test extends \advanced_testcase {
      * @param int $sessdate The session date.
      * @param int $groupid The group id, 0 for all participants.
      * @param bool $taken Whether the session has been taken.
+     * @param int $statusset The status set of the session.
      * @return int The session id.
      */
-    protected function add_session(int $attendanceid, int $sessdate, int $groupid = 0, bool $taken = true): int {
+    protected function add_session(
+        int $attendanceid,
+        int $sessdate,
+        int $groupid = 0,
+        bool $taken = true,
+        int $statusset = 0
+    ): int {
         global $DB;
         return $DB->insert_record('attendance_sessions', [
             'attendanceid' => $attendanceid,
@@ -789,7 +845,7 @@ final class report_test extends \advanced_testcase {
             'timemodified' => time(),
             'description' => '',
             'descriptionformat' => FORMAT_HTML,
-            'statusset' => 0,
+            'statusset' => $statusset,
             'calendarevent' => 0,
         ]);
     }

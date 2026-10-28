@@ -278,17 +278,21 @@ class report {
     /**
      * Whether a row counts as below the threshold for the belowthresholdonly filter.
      *
-     * Participants without taken sessions are not below the threshold, except with the basis "all
-     * sessions" if sessions relevant to them have already taken place (started).
+     * Rows whose percentage is undefined (no maximum points of the selected basis, e.g. no sessions or
+     * only statuses without points) are not below the threshold. Participants without taken sessions are
+     * not below the threshold either, except with the basis "all sessions" if sessions relevant to them
+     * have already taken place (started).
      *
      * @param stdClass $summary A summary returned by {@see get_course_summaries()}.
      * @return bool
      */
     public function is_below_threshold(stdClass $summary): bool {
-        if ($summary->numtakensessions == 0) {
-            if ($this->basis === self::BASIS_TAKEN || $summary->numpastsessions == 0) {
-                return false;
-            }
+        if ($this->get_basis_maxpoints($summary) <= 0) {
+            return false;
+        }
+        // With the basis "taken sessions", participants without taken sessions have no maximum points.
+        if ($summary->numtakensessions == 0 && $summary->numpastsessions == 0) {
+            return false;
         }
         return !$this->meets_threshold($summary);
     }

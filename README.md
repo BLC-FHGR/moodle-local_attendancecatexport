@@ -65,8 +65,11 @@ selected basis is below the threshold are exported.
   sessions relevant to them (sessions for all participants or for one of their groups) have already
   started. With the basis *Taken sessions* their percentage is undefined, and with only future sessions
   there is nothing they could have missed yet.
-- This rule only affects the filter. The *Threshold met* column shows *No* for participants without
-  points, as their percentage is 0.
+- **Rows without maximum points** for the selected basis (no sessions yet, or only sessions whose
+  status set has no status with points) have an undefined percentage and are not considered below
+  the threshold either.
+- These rules only affect the filter. The *Threshold met* column shows *No* for such rows, as their
+  percentage is reported as 0 (as in the activity report).
 
 ### Course filters
 
