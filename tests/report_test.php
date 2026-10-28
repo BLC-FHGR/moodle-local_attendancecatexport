@@ -253,7 +253,9 @@ final class report_test extends \advanced_testcase {
         report::require_export_capability($context);
         $node = \navigation_node::create('category');
         local_attendancecatexport_extend_navigation_category_settings($node, $context);
-        $this->assertNotEmpty($node->get('local_attendancecatexport', \navigation_node::TYPE_SETTING));
+        $exportnode = $node->get('local_attendancecatexport', \navigation_node::TYPE_SETTING);
+        $this->assertNotEmpty($exportnode);
+        $this->assertTrue($exportnode->forceintomoremenu);
 
         $this->setUser($teacher);
         $this->assertFalse(report::can_export($context));

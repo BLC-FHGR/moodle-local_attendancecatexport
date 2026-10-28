@@ -38,7 +38,7 @@ function local_attendancecatexport_extend_navigation_category_settings(
         return;
     }
     $url = new moodle_url('/local/attendancecatexport/export.php', ['categoryid' => $context->instanceid]);
-    $parentnode->add(
+    $node = $parentnode->add(
         get_string('exportmenu', 'local_attendancecatexport'),
         $url,
         navigation_node::TYPE_SETTING,
@@ -46,4 +46,6 @@ function local_attendancecatexport_extend_navigation_category_settings(
         'local_attendancecatexport',
         new pix_icon('i/export', '')
     );
+    // Show the link in the "More" menu of the category secondary navigation.
+    $node->set_force_into_more_menu(true);
 }
