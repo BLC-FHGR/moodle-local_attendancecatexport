@@ -192,7 +192,8 @@ class report {
     public function get_columns(): array {
         $keys = [
             'category', 'courseshortname', 'coursefullname', 'lastname', 'firstname', 'email', 'idnumber',
-            'numtakensessions', 'numallsessions', 'points', 'maxpoints', 'percenttaken', 'percentall', 'thresholdmet',
+            'numtakensessions', 'numallsessions', 'points', 'maxpoints', 'percenttaken', 'percentall', 'percentmaxpossible',
+            'thresholdmet', 'thresholdreachable',
         ];
         $columns = [];
         foreach ($keys as $key) {
@@ -240,7 +241,9 @@ class report {
                     'maxpoints' => round($this->get_basis_maxpoints($summary), 2),
                     'percenttaken' => round($summary->takenpercentage * 100, 2),
                     'percentall' => round($summary->allpercentage * 100, 2),
+                    'percentmaxpossible' => round($summary->maxpossiblepercentage * 100, 2),
                     'thresholdmet' => $this->meets_threshold($summary) ? $yes : $no,
+                    'thresholdreachable' => $this->can_reach_threshold($summary) ? $yes : $no,
                 ];
             }
         }
@@ -259,20 +262,43 @@ class report {
     /**
      * Whether the percentage of the selected basis reaches the threshold.
      *
-     * Compares the unrounded values (points * 100 >= threshold * maxpoints), so a percentage that is only
-     * rounded up to the threshold in the export does not meet it. Without maximum points the percentage is
-     * 0, as in attendance_calc_fraction().
-     *
      * @param stdClass $summary A summary returned by {@see get_course_summaries()}.
      * @return bool
      */
     public function meets_threshold(stdClass $summary): bool {
-        $maxpoints = $this->get_basis_maxpoints($summary);
+        return $this->reaches_threshold($summary->points, $this->get_basis_maxpoints($summary));
+    }
+
+    /**
+     * Whether the threshold can still be reached with full points in all sessions not taken yet.
+     *
+     * Uses the maximum possible percentage, which always relates to all sessions (independent of the
+     * selected basis).
+     *
+     * @param stdClass $summary A summary returned by {@see get_course_summaries()}.
+     * @return bool
+     */
+    public function can_reach_threshold(stdClass $summary): bool {
+        return $this->reaches_threshold($summary->maxpossiblepoints, $summary->allmaxpoints);
+    }
+
+    /**
+     * Whether points of maximum points reach the threshold.
+     *
+     * Compares the unrounded values (points * 100 >= threshold * maxpoints), so a percentage that is only
+     * rounded up to the threshold in the export does not reach it. Without maximum points the percentage
+     * is 0, as in attendance_calc_fraction().
+     *
+     * @param float $points The points.
+     * @param float $maxpoints The maximum points.
+     * @return bool
+     */
+    protected function reaches_threshold(float $points, float $maxpoints): bool {
         if ($maxpoints <= 0) {
             return $this->threshold <= 0;
         }
         // The tolerance only absorbs floating point noise of the multiplication.
-        return $summary->points * 100 - $this->threshold * $maxpoints >= -1e-9;
+        return $points * 100 - $this->threshold * $maxpoints >= -1e-9;
     }
 
     /**

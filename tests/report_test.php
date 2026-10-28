@@ -227,6 +227,23 @@ final class report_test extends \advanced_testcase {
         $this->assertEqualsWithDelta(10 / 12, $summary->maxpossiblepercentage, 0.0001);
 
         $this->assert_matches_mod_attendance($course->id, $summaries);
+
+        // Columns: 13 / 16 = 81.25 % and 10 / 12 = 83.333 %, compared unrounded with the threshold.
+        $category = core_course_category::get($category->id);
+        $rowsfor = function (float $threshold) use ($category): array {
+            $rows = iterator_to_array((new report($category, true, $threshold))->get_rows(), false);
+            return array_column($rows, null, 'email');
+        };
+        $rows = $rowsfor(82);
+        $this->assertEquals(81.25, $rows[$member->email]['percentmaxpossible']);
+        $this->assertEquals(83.33, $rows[$other->email]['percentmaxpossible']);
+        $this->assertEquals(get_string('no'), $rows[$member->email]['thresholdreachable']);
+        $this->assertEquals(get_string('yes'), $rows[$other->email]['thresholdreachable']);
+        $this->assertEquals(get_string('yes'), $rowsfor(81.25)[$member->email]['thresholdreachable']);
+        $this->assertEquals(get_string('no'), $rowsfor(81.2501)[$member->email]['thresholdreachable']);
+        // 83.333 % is exported as 83.33 but reaches a threshold of 83.333.
+        $this->assertEquals(get_string('yes'), $rowsfor(83.333)[$other->email]['thresholdreachable']);
+        $this->assertEquals(get_string('no'), $rowsfor(83.334)[$other->email]['thresholdreachable']);
     }
 
     /**
@@ -581,7 +598,9 @@ final class report_test extends \advanced_testcase {
                 $this->assertEquals(0, $row['maxpoints']);
                 $this->assertEquals(0, $row['percenttaken']);
                 $this->assertEquals(0, $row['percentall']);
+                $this->assertEquals(0, $row['percentmaxpossible']);
                 $this->assertEquals(get_string('no'), $row['thresholdmet']);
+                $this->assertEquals(get_string('no'), $row['thresholdreachable']);
             }
             $report = new report($category, true, 80, $basis, ['belowthresholdonly' => true]);
             $this->assertCount(0, iterator_to_array($report->get_rows(), false));

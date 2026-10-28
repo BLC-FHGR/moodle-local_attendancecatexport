@@ -102,7 +102,9 @@ selected basis is below the threshold are exported.
 | Max. points | Maximum points, depending on the selected basis: of all sessions (*All sessions*) or of the taken sessions only (*Taken sessions*). |
 | % taken sessions | Points / maximum points of the taken sessions, in percent (2 decimals). |
 | % all sessions | Points / maximum points of all sessions, in percent (2 decimals). |
+| Max. possible % | Percentage of all sessions the participant reaches if they get full points in every session not taken for them yet (see below), in percent (2 decimals). |
 | Threshold met | *Yes* if the percentage of the selected basis is at least the threshold, otherwise *No*. The unrounded values are compared, so e.g. 66.666 % (exported as 66.67) does not meet a threshold of 66.67. |
+| Threshold still reachable | *Yes* if *Max. possible %* is at least the threshold (unrounded), otherwise *No*. Independent of the selected basis. |
 
 ## Calculation
 
@@ -124,6 +126,25 @@ course module cache. The PHPUnit tests compare the results with `mod_attendance_
 For reference, a category with 120 courses, 160 attendance activities, 3,600 participant rows and
 about 56,000 attendance log entries was exported with about 800 queries in about 0.5 seconds and
 23 MB peak memory (warm caches, local database).
+
+### Maximum possible percentage
+
+*Max. possible %* uses the "Maximum possible" logic of the activity report
+(`mod_attendance_summary`):
+
+    max. possible points = points + (max. points of all sessions - max. points of the taken sessions)
+    max. possible %      = max. possible points / max. points of all sessions
+
+- "Taken sessions" are the sessions in which the participant has a status. A session that has been
+  taken without a status for the participant therefore still counts as reachable, as in mod_attendance.
+- Sessions not yet taken include past and future sessions; group sessions only count for members of
+  the group (in group mode).
+- With several attendance activities in a course, the points are summed over all activities before
+  the percentage is computed.
+- Without any session (maximum points 0), the percentage is 0 and the threshold is not reachable.
+- The Report Builder source of mod_attendance computes "Maximum possible" differently (one maximum
+  grade per course, all sessions regardless of groups and course start date). The plugin follows
+  the activity report instead.
 
 Further rules:
 
