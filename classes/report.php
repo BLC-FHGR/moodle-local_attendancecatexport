@@ -305,7 +305,12 @@ class report {
      *
      * Each returned object contains: userid, firstname, lastname, email, idnumber, numtakensessions,
      * numallsessions, numpastsessions (sessions that have already started), points, takenmaxpoints,
-     * allmaxpoints, takenpercentage, allpercentage (percentages as fractions between 0 and 1).
+     * allmaxpoints, maxpossiblepoints, takenpercentage, allpercentage, maxpossiblepercentage
+     * (percentages as fractions between 0 and 1).
+     *
+     * The maximum possible points are the points the participant reaches with full points in all sessions
+     * not taken for them yet, as in mod_attendance_summary::get_all_sessions_summary_for(): points plus
+     * the difference between the maximum points of all sessions and of the taken sessions.
      *
      * @param int|\core_course_list_element $course The course id, or the course from {@see get_courses()},
      *                                             which saves a query per course.
@@ -388,8 +393,10 @@ class report {
         }
 
         foreach ($summaries as $summary) {
+            $summary->maxpossiblepoints = $summary->points + ($summary->allmaxpoints - $summary->takenmaxpoints);
             $summary->takenpercentage = attendance_calc_fraction($summary->points, $summary->takenmaxpoints);
             $summary->allpercentage = attendance_calc_fraction($summary->points, $summary->allmaxpoints);
+            $summary->maxpossiblepercentage = attendance_calc_fraction($summary->maxpossiblepoints, $summary->allmaxpoints);
             $summary->sortkey = $summary->lastname . "\t" . $summary->firstname . "\t" . sprintf('%010d', $summary->userid);
         }
         core_collator::asort_objects_by_property($summaries, 'sortkey');

@@ -159,6 +159,77 @@ final class report_test extends \advanced_testcase {
     }
 
     /**
+     * The maximum possible points add full points for all sessions not taken for the participant, like
+     * mod_attendance, aggregated over instances and with group sessions only for group members.
+     */
+    public function test_max_possible(): void {
+        global $DB;
+        $generator = $this->getDataGenerator();
+        $category = $generator->create_category();
+        $course = $generator->create_course([
+            'category' => $category->id,
+            'startdate' => $this->coursestart,
+            'groupmode' => SEPARATEGROUPS,
+        ]);
+        $group = $generator->create_group(['courseid' => $course->id]);
+        $member = $generator->create_and_enrol($course, 'student');
+        $other = $generator->create_and_enrol($course, 'student');
+        $generator->create_group_member(['groupid' => $group->id, 'userid' => $member->id]);
+        $day = fn(int $days): int => $this->coursestart + $days * DAYSECS;
+        $future = time() + DAYSECS;
+        $addstatus = fn(int $attendanceid, string $acronym, int $grade): int =>
+            (int) $DB->insert_record('attendance_statuses', [
+                'attendanceid' => $attendanceid,
+                'acronym' => $acronym,
+                'description' => $acronym,
+                'grade' => $grade,
+                'setnumber' => 1,
+            ]);
+
+        // Instance A in group mode, status set 0 (maximum 2) and status set 1 (maximum 3).
+        $atta = $this->create_attendance($course, SEPARATEGROUPS);
+        $addstatus($atta->id, 'X', 3);
+        $sessionid = $this->add_session($atta->id, $day(1));
+        $this->add_log($sessionid, $member->id, $this->get_status($atta->id, 2));
+        $this->add_log($sessionid, $other->id, $this->get_status($atta->id, 0));
+        $sessionid = $this->add_session($atta->id, $day(2), $group->id);
+        $this->add_log($sessionid, $member->id, $this->get_status($atta->id, 1));
+        // Taken, but without a log for the group member: counts as not taken for them.
+        $sessionid = $this->add_session($atta->id, $day(3));
+        $this->add_log($sessionid, $other->id, $this->get_status($atta->id, 2));
+        $this->add_session($atta->id, $future, 0, false, 1);
+        $this->add_session($atta->id, $future, $group->id, false);
+
+        // Instance B without group mode, a taken session with status set 1 and an open one with set 0.
+        $attb = $this->create_attendance($course, NOGROUPS);
+        $high = $addstatus($attb->id, 'X', 3);
+        $low = $addstatus($attb->id, 'Y', 1);
+        $sessionid = $this->add_session($attb->id, $day(1), 0, true, 1);
+        $this->add_log($sessionid, $member->id, $low);
+        $this->add_log($sessionid, $other->id, $high);
+        $this->add_session($attb->id, $future, 0, false);
+
+        $summaries = (new report(core_course_category::get($category->id)))->get_course_summaries($course->id);
+
+        // Group member: points 2 + 1 + 1 = 4 of 7 taken, all sessions 2 + 2 + 2 + 3 + 2 (A) + 3 + 2 (B) = 16.
+        $summary = $summaries[$member->id];
+        $this->assertEqualsWithDelta(4, $summary->points, 0.001);
+        $this->assertEqualsWithDelta(7, $summary->takenmaxpoints, 0.001);
+        $this->assertEqualsWithDelta(16, $summary->allmaxpoints, 0.001);
+        $this->assertEqualsWithDelta(13, $summary->maxpossiblepoints, 0.001);
+        $this->assertEqualsWithDelta(13 / 16, $summary->maxpossiblepercentage, 0.0001);
+
+        // Other participant: no group sessions; points 0 + 2 + 3 = 5 of 7 taken, all sessions 2 + 2 + 3 + 3 + 2 = 12.
+        $summary = $summaries[$other->id];
+        $this->assertEqualsWithDelta(5, $summary->points, 0.001);
+        $this->assertEqualsWithDelta(12, $summary->allmaxpoints, 0.001);
+        $this->assertEqualsWithDelta(10, $summary->maxpossiblepoints, 0.001);
+        $this->assertEqualsWithDelta(10 / 12, $summary->maxpossiblepercentage, 0.0001);
+
+        $this->assert_matches_mod_attendance($course->id, $summaries);
+    }
+
+    /**
      * Group sessions only count for members of the group, and only in group mode.
      */
     public function test_group_sessions(): void {
@@ -939,7 +1010,8 @@ final class report_test extends \advanced_testcase {
     protected function assert_matches_mod_attendance(int $courseid, array $summaries): void {
         $instances = get_fast_modinfo($courseid)->get_instances_of('attendance');
         foreach ($summaries as $userid => $summary) {
-            $expected = ['numtakensessions' => 0, 'numallsessions' => 0, 'points' => 0, 'takenmax' => 0, 'allmax' => 0];
+            $expected = ['numtakensessions' => 0, 'numallsessions' => 0, 'points' => 0, 'takenmax' => 0, 'allmax' => 0,
+                'maxpossible' => 0];
             foreach ($instances as $cm) {
                 $usersummary = (new \mod_attendance_summary($cm->instance))->get_all_sessions_summary_for($userid);
                 $expected['numtakensessions'] += $usersummary->numtakensessions;
@@ -947,12 +1019,19 @@ final class report_test extends \advanced_testcase {
                 $expected['points'] += $usersummary->takensessionspoints;
                 $expected['takenmax'] += $usersummary->takensessionsmaxpoints;
                 $expected['allmax'] += $usersummary->allsessionsmaxpoints;
+                // Only formatted with one decimal ("points / max points"), so parse the displayed value.
+                $expected['maxpossible'] += unformat_float(explode(' / ', $usersummary->maxpossiblepoints)[0]);
+                $maxpossiblepercentage = unformat_float(rtrim($usersummary->maxpossiblepercentage, '%'));
             }
             $this->assertEquals($expected['numtakensessions'], $summary->numtakensessions);
             $this->assertEquals($expected['numallsessions'], $summary->numallsessions);
             $this->assertEqualsWithDelta($expected['points'], $summary->points, 0.001);
             $this->assertEqualsWithDelta($expected['takenmax'], $summary->takenmaxpoints, 0.001);
             $this->assertEqualsWithDelta($expected['allmax'], $summary->allmaxpoints, 0.001);
+            $this->assertEqualsWithDelta($expected['maxpossible'], $summary->maxpossiblepoints, 0.051 * count($instances));
+            if (count($instances) == 1) {
+                $this->assertEqualsWithDelta($maxpossiblepercentage, $summary->maxpossiblepercentage * 100, 0.051);
+            }
         }
     }
 
