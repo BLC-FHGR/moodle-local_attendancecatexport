@@ -33,6 +33,19 @@ final class report_test extends \advanced_testcase {
     protected int $coursestart;
 
     /**
+     * Courses for {@see test_filter_combinations()}: category, visible, start date, end date (null for
+     * none) and whether the participant is below the threshold.
+     *
+     * @var array
+     */
+    private const FILTER_COMBINATION_COURSES = [
+        'PV' => ['parent', 1, '2026-01-10', null, true],
+        'PH' => ['parent', 0, '2026-03-01', '2026-07-31', false],
+        'CV' => ['child', 1, '2026-09-01', '2027-01-31', false],
+        'CH' => ['child', 0, '2026-02-15', '2026-05-31', true],
+    ];
+
+    /**
      * Set up.
      */
     protected function setUp(): void {
@@ -90,6 +103,54 @@ final class report_test extends \advanced_testcase {
         $this->assertEquals(80.0, $rows[0]['percenttaken']);
         $this->assertEquals(66.67, $rows[0]['percentall']);
         $this->assertEquals(12, $rows[0]['maxpoints']);
+    }
+
+    /**
+     * Status sets, hidden and deleted statuses and sessions before the course start are handled like
+     * mod_attendance.
+     */
+    public function test_status_sets_and_hidden_deleted_statuses(): void {
+        global $DB;
+        $generator = $this->getDataGenerator();
+        $category = $generator->create_category();
+        $course = $generator->create_course(['category' => $category->id, 'startdate' => $this->coursestart]);
+        $student = $generator->create_and_enrol($course, 'student');
+        $att = $this->create_attendance($course);
+        $addstatus = fn(string $acronym, float $grade, int $set, int $visible = 1, int $deleted = 0): int =>
+            (int) $DB->insert_record('attendance_statuses', [
+                'attendanceid' => $att->id,
+                'acronym' => $acronym,
+                'description' => $acronym,
+                'grade' => $grade,
+                'setnumber' => $set,
+                'visible' => $visible,
+                'deleted' => $deleted,
+            ]);
+        // Status set 0: the default statuses (maximum 2) and a hidden and a deleted status with more points.
+        $present = $this->get_status($att->id, 2);
+        $hidden = $addstatus('H', 5, 0, 0);
+        $deleted = $addstatus('D', 4, 0, 1, 1);
+        // Status set 1: maximum 3.
+        $addstatus('X', 3, 1);
+        $setonelow = $addstatus('Y', 1, 1);
+
+        $this->add_log($this->add_session($att->id, $this->coursestart + DAYSECS), $student->id, $present);
+        $this->add_log($this->add_session($att->id, $this->coursestart + 2 * DAYSECS, 0, true, 1), $student->id, $setonelow);
+        // Logs with a deleted or hidden status do not count as taken.
+        $this->add_log($this->add_session($att->id, $this->coursestart + 3 * DAYSECS), $student->id, $deleted);
+        $this->add_log($this->add_session($att->id, $this->coursestart + 4 * DAYSECS), $student->id, $hidden);
+        $this->add_session($att->id, time() + DAYSECS, 0, false, 1);
+        // Sessions before the course start are ignored.
+        $this->add_log($this->add_session($att->id, $this->coursestart - DAYSECS), $student->id, $present);
+
+        $summaries = (new report(core_course_category::get($category->id)))->get_course_summaries($course->id);
+        $summary = $summaries[$student->id];
+        $this->assertEquals(2, $summary->numtakensessions);
+        $this->assertEquals(5, $summary->numallsessions);
+        $this->assertEqualsWithDelta(3, $summary->points, 0.001);
+        $this->assertEqualsWithDelta(5, $summary->takenmaxpoints, 0.001);
+        $this->assertEqualsWithDelta(12, $summary->allmaxpoints, 0.001);
+        $this->assert_matches_mod_attendance($course->id, $summaries);
     }
 
     /**
@@ -585,6 +646,99 @@ final class report_test extends \advanced_testcase {
         sort($expectedids);
         sort($loadedids);
         $this->assertEquals($expectedids, $loadedids);
+    }
+
+    /**
+     * Data provider for {@see test_filter_combinations()}: all combinations of subcategories, hidden
+     * courses, date filter and "below threshold only".
+     *
+     * @return array
+     */
+    public static function filter_combinations_provider(): array {
+        $datefilters = ['none' => [], 'start from' => ['startfrom' => '2026-02-01'], 'end to' => ['endto' => '2026-06-30']];
+        $cases = [];
+        foreach ([false, true] as $subcategories) {
+            foreach ([false, true] as $hidden) {
+                foreach ($datefilters as $datename => $datefilter) {
+                    foreach ([false, true] as $belowonly) {
+                        $expected = [];
+                        foreach (self::FILTER_COMBINATION_COURSES as $shortname => [$category, $visible, $start, $end, $below]) {
+                            $startfrom = $datefilter['startfrom'] ?? null;
+                            $endto = $datefilter['endto'] ?? null;
+                            if (
+                                (!$subcategories && $category === 'child') ||
+                                (!$hidden && !$visible) ||
+                                ($startfrom && $start < $startfrom) ||
+                                ($endto && $end && $end > $endto) ||
+                                ($belowonly && !$below)
+                            ) {
+                                continue;
+                            }
+                            $expected[] = $shortname;
+                        }
+                        sort($expected);
+                        $name = sprintf(
+                            'subcategories %s, hidden %s, date %s, below only %s',
+                            json_encode($subcategories),
+                            json_encode($hidden),
+                            $datename,
+                            json_encode($belowonly)
+                        );
+                        $cases[$name] = [$subcategories, $hidden, $datefilter, $belowonly, $expected];
+                    }
+                }
+            }
+        }
+        return $cases;
+    }
+
+    /**
+     * All filters work together.
+     *
+     * @dataProvider filter_combinations_provider
+     * @param bool $subcategories Whether subcategories are included.
+     * @param bool $hidden Whether hidden courses are included.
+     * @param array $datefilter Date filters with dates as 'Y-m-d' (UTC).
+     * @param bool $belowonly Whether only rows below the threshold are exported.
+     * @param string[] $expected Expected course short names, sorted.
+     */
+    public function test_filter_combinations(
+        bool $subcategories,
+        bool $hidden,
+        array $datefilter,
+        bool $belowonly,
+        array $expected
+    ): void {
+        $generator = $this->getDataGenerator();
+        $categories = ['parent' => $generator->create_category()];
+        $categories['child'] = $generator->create_category(['parent' => $categories['parent']->id]);
+        foreach (self::FILTER_COMBINATION_COURSES as $shortname => [$category, $visible, $start, $end, $below]) {
+            $course = $generator->create_course([
+                'category' => $categories[$category]->id,
+                'shortname' => $shortname,
+                'visible' => $visible,
+                'startdate' => self::utc_timestamp($start),
+                'enddate' => $end ? self::utc_timestamp($end) : 0,
+            ]);
+            $student = $generator->create_and_enrol($course, 'student');
+            $att = $this->create_attendance($course);
+            $sessionid = $this->add_session($att->id, self::utc_timestamp($start) + DAYSECS);
+            $this->add_log($sessionid, $student->id, $this->get_status($att->id, $below ? 0 : 2));
+        }
+
+        $filters = array_map(fn($date) => self::utc_timestamp($date), $datefilter);
+        $filters['includehidden'] = $hidden;
+        $filters['belowthresholdonly'] = $belowonly;
+        $report = new report(
+            core_course_category::get($categories['parent']->id),
+            $subcategories,
+            80,
+            report::BASIS_ALL,
+            $filters
+        );
+        $shortnames = array_column(iterator_to_array($report->get_rows(), false), 'courseshortname');
+        sort($shortnames);
+        $this->assertEquals($expected, $shortnames);
     }
 
     /**
