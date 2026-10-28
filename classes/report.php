@@ -142,13 +142,17 @@ class report {
      * Returns the courses to export, with the course filters applied.
      *
      * Filtering uses the course fields cached by core_course_category, so no attendance data is loaded
-     * for courses that are filtered out.
+     * for courses that are filtered out. Courses in which the capability is not granted (e.g. prohibited
+     * by an override in a subcategory or in the course) are excluded as well.
      *
      * @return \core_course_list_element[]
      */
     public function get_courses(): array {
         $courses = $this->category->get_courses(['recursive' => $this->includesubcategories]);
-        return array_filter($courses, [$this, 'course_matches_filters']);
+        return array_filter($courses, function (\core_course_list_element $course): bool {
+            return $this->course_matches_filters($course)
+                && has_capability(self::CAPABILITY, context_course::instance($course->id));
+        });
     }
 
     /**

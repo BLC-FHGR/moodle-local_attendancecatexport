@@ -604,6 +604,41 @@ final class report_test extends \advanced_testcase {
     }
 
     /**
+     * Courses in which the capability is prohibited or prevented by an override are not exported.
+     */
+    public function test_capability_overridden_in_subcategory_and_course(): void {
+        global $DB;
+        $generator = $this->getDataGenerator();
+        $parent = $generator->create_category();
+        $child = $generator->create_category(['parent' => $parent->id]);
+        $courses = [
+            'PARENT' => $generator->create_course(['category' => $parent->id, 'shortname' => 'PARENT']),
+            'PREVENTED' => $generator->create_course(['category' => $parent->id, 'shortname' => 'PREVENTED']),
+            'CHILD' => $generator->create_course(['category' => $child->id, 'shortname' => 'CHILD']),
+        ];
+        foreach ($courses as $course) {
+            $generator->create_and_enrol($course, 'student');
+            $this->create_attendance($course);
+        }
+
+        $managerroleid = $DB->get_field('role', 'id', ['shortname' => 'manager']);
+        $manager = $generator->create_user();
+        $generator->role_assign($managerroleid, $manager->id, context_coursecat::instance($parent->id)->id);
+        assign_capability(report::CAPABILITY, CAP_PROHIBIT, $managerroleid, context_coursecat::instance($child->id)->id);
+        assign_capability(
+            report::CAPABILITY,
+            CAP_PREVENT,
+            $managerroleid,
+            \context_course::instance($courses['PREVENTED']->id)->id
+        );
+
+        $this->setUser($manager);
+        $report = new report(core_course_category::get($parent->id));
+        $this->assertEquals(['PARENT'], array_values(array_map(fn($course) => $course->shortname, $report->get_courses())));
+        $this->assertEquals(['PARENT'], array_column(iterator_to_array($report->get_rows(), false), 'courseshortname'));
+    }
+
+    /**
      * The report exported event contains the export options.
      *
      * @covers \local_attendancecatexport\event\report_exported

@@ -27,6 +27,9 @@ The plugin defines no capability of its own. It uses the existing capability
 By default this capability is granted to the *Manager* role. To give programme leads access, assign
 them a role with this capability in the respective course category.
 
+The capability is additionally checked in the context of every exported course. Courses in which it
+is prevented or prohibited (by an override in a subcategory or in the course itself) are not exported.
+
 ## Usage
 
 1. Open the course category and choose **Attendance export** in the category's *More* menu
