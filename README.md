@@ -49,6 +49,9 @@ all selected options and filters.
 If no rows remain for the selected options, no file is downloaded. Instead, a notice is shown on the
 page (and no event is logged).
 
+Large categories: the rows are computed course by course and streamed into the file. The PHP time
+limit is lifted and the memory limit raised (`MEMORY_EXTRA`) before the computation starts.
+
 ### Only participants below the threshold
 
 If **Only export participants below the threshold** is checked, only rows whose percentage of the

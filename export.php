@@ -51,6 +51,12 @@ if ($data = $form->get_data()) {
     $filters = export_form::get_filters($data);
     $report = new report($category, !empty($data->includesubcategories), (float) $data->threshold, $data->basis, $filters);
 
+    // Finding the first row may require computing the whole category (e.g. if only rows below the
+    // threshold are exported), so raise the limits now; download_data() only raises the time limit once
+    // it starts writing.
+    core_php_time_limit::raise();
+    raise_memory_limit(MEMORY_EXTRA);
+
     // Compute up to the first row to avoid downloading an empty file. NoRewindIterator keeps the
     // generator from being rewound when download_data() iterates over it.
     $rows = new NoRewindIterator($report->get_rows());
