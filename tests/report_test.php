@@ -98,7 +98,7 @@ final class report_test extends \advanced_testcase {
 
         $this->assert_matches_mod_attendance($course->id, $summaries);
 
-        // get_rows() caches the course modinfo with a partial course record (without start date).
+        // The modinfo cached by get_rows() holds a partial course record (without start date).
         get_fast_modinfo(0, 0, true);
         $rows = iterator_to_array($report->get_rows(), false);
         $this->assertCount(1, $rows);
