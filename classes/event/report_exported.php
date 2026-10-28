@@ -31,6 +31,7 @@ namespace local_attendancecatexport\event;
  *      - int endfrom: course end date filter "from" (timestamp, 0 = not set).
  *      - int endto: course end date filter "to" (timestamp, 0 = not set).
  *      - bool includehidden: whether hidden courses were included.
+ *      - bool belowthresholdonly: whether only rows below the threshold were exported.
  * }
  *
  * @package    local_attendancecatexport
@@ -85,7 +86,7 @@ class report_exported extends \core\event\base {
             throw new \coding_exception('Context level must be CONTEXT_COURSECAT.');
         }
         $keys = ['includesubcategories', 'threshold', 'basis', 'dataformat', 'startfrom', 'startto', 'endfrom', 'endto',
-            'includehidden'];
+            'includehidden', 'belowthresholdonly'];
         foreach ($keys as $key) {
             if (!isset($this->other[$key])) {
                 throw new \coding_exception("The '$key' value must be set in other.");

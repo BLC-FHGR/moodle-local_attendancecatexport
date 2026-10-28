@@ -28,6 +28,10 @@ $string['basis'] = 'Percentage basis';
 $string['basis_all'] = 'All sessions';
 $string['basis_help'] = 'Which percentage is used for the "Threshold met" column and the "Max. points" column. "All sessions" relates the points to all sessions of the activity since the course start date, including sessions not yet taken (as in the "All sessions" summary of the attendance report). "Taken sessions" relates the points to the sessions already taken only.';
 $string['basis_taken'] = 'Taken sessions';
+$string['belowthresholdonly'] = 'Only export participants below the threshold';
+$string['belowthresholdonly_help'] = 'If checked, only rows (course and participant) whose percentage of the selected basis is below the threshold are exported. Each course is evaluated separately.
+
+Participants without taken sessions are not considered below the threshold, except with the basis "All sessions" if sessions have already taken place for them.';
 $string['col_category'] = 'Course category';
 $string['col_coursefullname'] = 'Course full name';
 $string['col_courseshortname'] = 'Course short name';
@@ -54,6 +58,7 @@ $string['exportintro'] = 'Exports the attendance of all participants for every c
 $string['exportmenu'] = 'Attendance export';
 $string['includehidden'] = 'Include hidden courses';
 $string['includesubcategories'] = 'Include subcategories';
+$string['norows'] = 'No data found for the selected options. No file has been created.';
 $string['pluginname'] = 'Attendance category export';
 $string['privacy:metadata'] = 'The Attendance category export plugin does not store any personal data. It only exports data stored by the attendance activity.';
 $string['startfrom'] = 'Course start date from';

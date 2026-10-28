@@ -57,19 +57,25 @@ class report {
     /** @var string One of the BASIS_* constants. */
     protected string $basis;
 
-    /** @var array Course filters, see {@see self::DEFAULT_FILTERS}. */
+    /** @var array Filters, see {@see self::DEFAULT_FILTERS}. */
     protected array $filters;
+
+    /** @var int Current time; sessions starting up to this time have taken place. */
+    protected int $now;
 
     /** @var string[] Cache of nested category names, indexed by category id. */
     protected array $categorynames = [];
 
     /**
-     * Default course filters.
+     * Default filters.
      *
-     * Date bounds are inclusive timestamps, 0 disables the bound:
+     * Course filters (date bounds are inclusive timestamps, 0 disables the bound):
      * - startfrom / startto: range of course.startdate.
      * - endfrom / endto: range of course.enddate. Courses without end date (0) always match.
      * - includehidden: whether hidden courses (course.visible = 0) are included.
+     *
+     * Row filters:
+     * - belowthresholdonly: only rows below the threshold, see {@see self::is_below_threshold()}.
      *
      * @var array
      */
@@ -79,6 +85,7 @@ class report {
         'endfrom' => 0,
         'endto' => 0,
         'includehidden' => false,
+        'belowthresholdonly' => false,
     ];
 
     /**
@@ -88,7 +95,7 @@ class report {
      * @param bool $includesubcategories Whether courses of subcategories are included.
      * @param float $threshold Threshold in percent (0-100).
      * @param string $basis One of the BASIS_* constants.
-     * @param array $filters Course filters, see {@see self::DEFAULT_FILTERS}.
+     * @param array $filters Filters, see {@see self::DEFAULT_FILTERS}.
      */
     public function __construct(
         core_course_category $category,
@@ -109,6 +116,7 @@ class report {
         $this->threshold = $threshold;
         $this->basis = $basis;
         $this->filters = $filters + self::DEFAULT_FILTERS;
+        $this->now = time();
     }
 
     /**
@@ -192,7 +200,8 @@ class report {
     /**
      * Returns the export rows, one per course and listed participant.
      *
-     * Courses without attendance instance are skipped.
+     * Courses without attendance instance are skipped. If the filter belowthresholdonly is set, only
+     * rows below the threshold are returned.
      *
      * @return \Generator Rows indexed by the keys of {@see get_columns()}.
      */
@@ -210,14 +219,8 @@ class report {
             $fullname = format_string($course->fullname, true, $formatoptions);
 
             foreach ($summaries as $summary) {
-                $percenttaken = round($summary->takenpercentage * 100, 2);
-                $percentall = round($summary->allpercentage * 100, 2);
-                if ($this->basis === self::BASIS_TAKEN) {
-                    $maxpoints = $summary->takenmaxpoints;
-                    $percent = $percenttaken;
-                } else {
-                    $maxpoints = $summary->allmaxpoints;
-                    $percent = $percentall;
+                if ($this->filters['belowthresholdonly'] && !$this->is_below_threshold($summary)) {
+                    continue;
                 }
                 yield [
                     'category' => $categoryname,
@@ -230,13 +233,60 @@ class report {
                     'numtakensessions' => $summary->numtakensessions,
                     'numallsessions' => $summary->numallsessions,
                     'points' => round($summary->points, 2),
-                    'maxpoints' => round($maxpoints, 2),
-                    'percenttaken' => $percenttaken,
-                    'percentall' => $percentall,
-                    'thresholdmet' => $percent >= $this->threshold ? $yes : $no,
+                    'maxpoints' => round($this->get_basis_maxpoints($summary), 2),
+                    'percenttaken' => round($summary->takenpercentage * 100, 2),
+                    'percentall' => round($summary->allpercentage * 100, 2),
+                    'thresholdmet' => $this->meets_threshold($summary) ? $yes : $no,
                 ];
             }
         }
+    }
+
+    /**
+     * Returns the maximum points of the selected basis.
+     *
+     * @param stdClass $summary A summary returned by {@see get_course_summaries()}.
+     * @return float
+     */
+    protected function get_basis_maxpoints(stdClass $summary): float {
+        return $this->basis === self::BASIS_TAKEN ? $summary->takenmaxpoints : $summary->allmaxpoints;
+    }
+
+    /**
+     * Whether the percentage of the selected basis reaches the threshold.
+     *
+     * Compares the unrounded values (points * 100 >= threshold * maxpoints), so a percentage that is only
+     * rounded up to the threshold in the export does not meet it. Without maximum points the percentage is
+     * 0, as in attendance_calc_fraction().
+     *
+     * @param stdClass $summary A summary returned by {@see get_course_summaries()}.
+     * @return bool
+     */
+    public function meets_threshold(stdClass $summary): bool {
+        $maxpoints = $this->get_basis_maxpoints($summary);
+        if ($maxpoints <= 0) {
+            return $this->threshold <= 0;
+        }
+        // The tolerance only absorbs floating point noise of the multiplication.
+        return $summary->points * 100 - $this->threshold * $maxpoints >= -1e-9;
+    }
+
+    /**
+     * Whether a row counts as below the threshold for the belowthresholdonly filter.
+     *
+     * Participants without taken sessions are not below the threshold, except with the basis "all
+     * sessions" if sessions relevant to them have already taken place (started).
+     *
+     * @param stdClass $summary A summary returned by {@see get_course_summaries()}.
+     * @return bool
+     */
+    public function is_below_threshold(stdClass $summary): bool {
+        if ($summary->numtakensessions == 0) {
+            if ($this->basis === self::BASIS_TAKEN || $summary->numpastsessions == 0) {
+                return false;
+            }
+        }
+        return !$this->meets_threshold($summary);
     }
 
     /**
@@ -246,8 +296,8 @@ class report {
      * participant is listed; percentages are computed from these sums (not averaged).
      *
      * Each returned object contains: userid, firstname, lastname, email, idnumber, numtakensessions,
-     * numallsessions, points, takenmaxpoints, allmaxpoints, takenpercentage, allpercentage
-     * (percentages as fractions between 0 and 1).
+     * numallsessions, numpastsessions (sessions that have already started), points, takenmaxpoints,
+     * allmaxpoints, takenpercentage, allpercentage (percentages as fractions between 0 and 1).
      *
      * @param int $courseid The course id.
      * @return stdClass[] Summaries indexed by user id, sorted by last name and first name. Empty if the
@@ -289,6 +339,7 @@ class report {
                         'idnumber' => $user->idnumber,
                         'numtakensessions' => 0,
                         'numallsessions' => 0,
+                        'numpastsessions' => 0,
                         'points' => 0.0,
                         'takenmaxpoints' => 0.0,
                         'allmaxpoints' => 0.0,
@@ -304,14 +355,15 @@ class report {
                 }
 
                 // See mod_attendance_summary::get_all_sessions_summary_for().
-                $summary->numallsessions += (int) $maxpointsbygroup[0]->numsessions;
-                $summary->allmaxpoints += (float) $maxpointsbygroup[0]->maxpoints;
+                $groupids = [0];
                 if ($withgroups && !empty($usergroups[$userid])) {
-                    foreach ($usergroups[$userid] as $groupid) {
-                        if (isset($maxpointsbygroup[$groupid])) {
-                            $summary->numallsessions += (int) $maxpointsbygroup[$groupid]->numsessions;
-                            $summary->allmaxpoints += (float) $maxpointsbygroup[$groupid]->maxpoints;
-                        }
+                    $groupids = array_merge($groupids, $usergroups[$userid]);
+                }
+                foreach ($groupids as $groupid) {
+                    if (isset($maxpointsbygroup[$groupid])) {
+                        $summary->numallsessions += (int) $maxpointsbygroup[$groupid]->numsessions;
+                        $summary->numpastsessions += (int) $maxpointsbygroup[$groupid]->numpastsessions;
+                        $summary->allmaxpoints += (float) $maxpointsbygroup[$groupid]->maxpoints;
                     }
                 }
             }
@@ -410,13 +462,14 @@ class report {
     /**
      * Computes the number of sessions and their maximum points per group for one attendance instance.
      *
-     * Same query as mod_attendance_summary::compute_maxpoints_by_group_session(). Group id 0 holds the
-     * sessions for all participants and is always present.
+     * Same query as mod_attendance_summary::compute_maxpoints_by_group_session(), additionally counting
+     * the sessions that have already started. Group id 0 holds the sessions for all participants and is
+     * always present.
      *
      * @param int $attendanceid The attendance instance id.
      * @param int $coursestartdate The course start date; earlier sessions are ignored.
      * @param bool $withgroups Whether the instance works in group mode.
-     * @return stdClass[] Records (groupid, numsessions, maxpoints) indexed by group id.
+     * @return stdClass[] Records (groupid, numsessions, numpastsessions, maxpoints) indexed by group id.
      */
     protected function get_maxpoints_by_group(int $attendanceid, int $coursestartdate, bool $withgroups): array {
         global $DB;
@@ -425,6 +478,7 @@ class report {
             'attid' => $attendanceid,
             'attid2' => $attendanceid,
             'cstartdate' => $coursestartdate,
+            'now' => $this->now,
         ];
 
         $where = '';
@@ -432,7 +486,8 @@ class report {
             $where = 'AND sess.groupid = 0';
         }
 
-        $sql = "SELECT sess.groupid, COUNT(*) AS numsessions, SUM(stamax.maxgrade) AS maxpoints
+        $sql = "SELECT sess.groupid, COUNT(*) AS numsessions, SUM(stamax.maxgrade) AS maxpoints,
+                       SUM(CASE WHEN sess.sessdate <= :now THEN 1 ELSE 0 END) AS numpastsessions
                   FROM {attendance_sessions} sess
                   JOIN (SELECT setnumber, MAX(grade) AS maxgrade
                           FROM {attendance_statuses}
@@ -448,7 +503,7 @@ class report {
         $maxpoints = $DB->get_records_sql($sql, $params);
 
         if (!isset($maxpoints[0])) {
-            $maxpoints[0] = (object) ['groupid' => 0, 'numsessions' => 0, 'maxpoints' => 0];
+            $maxpoints[0] = (object) ['groupid' => 0, 'numsessions' => 0, 'numpastsessions' => 0, 'maxpoints' => 0];
         }
         return $maxpoints;
     }

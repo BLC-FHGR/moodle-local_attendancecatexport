@@ -234,6 +234,160 @@ final class report_test extends \advanced_testcase {
     }
 
     /**
+     * Data provider for {@see test_threshold_boundaries()}.
+     *
+     * Grades of the default status set: present 2, late 1, absent 0 (maximum 2 per session).
+     *
+     * @return array Grades of the taken sessions, number of open sessions, basis, threshold, expected
+     *               "below threshold".
+     */
+    public static function threshold_boundaries_provider(): array {
+        return [
+            'taken: exactly on threshold' => [[2, 2, 2, 2, 0], 1, report::BASIS_TAKEN, 80, false],
+            'taken: just above threshold' => [[2, 2, 2, 2, 0], 1, report::BASIS_TAKEN, 79.9999, false],
+            'taken: just below threshold' => [[2, 2, 2, 2, 0], 1, report::BASIS_TAKEN, 80.0001, true],
+            'taken: open sessions ignored' => [[2, 2, 2, 2], 1, report::BASIS_TAKEN, 100, false],
+            'all: exactly on threshold' => [[2, 2, 2, 2], 1, report::BASIS_ALL, 80, false],
+            'all: just above threshold' => [[2, 2, 2, 2], 1, report::BASIS_ALL, 79.9999, false],
+            'all: just below threshold' => [[2, 2, 2, 2], 1, report::BASIS_ALL, 80.0001, true],
+            'taken: 66.666 % (exported as 66.67) is below 66.67' => [[2, 2, 0], 0, report::BASIS_TAKEN, 66.67, true],
+            'taken: 66.666 % meets 66.66' => [[2, 2, 0], 0, report::BASIS_TAKEN, 66.66, false],
+            'all: 83.333 % (exported as 83.33) meets 83.333' => [[2, 2, 1], 0, report::BASIS_ALL, 83.333, false],
+        ];
+    }
+
+    /**
+     * The threshold is compared on unrounded values of the selected basis.
+     *
+     * @dataProvider threshold_boundaries_provider
+     * @param int[] $grades Grades of the taken sessions.
+     * @param int $numopen Number of sessions not taken yet.
+     * @param string $basis The percentage basis.
+     * @param float $threshold The threshold in percent.
+     * @param bool $expectedbelow Whether the row is expected below the threshold.
+     */
+    public function test_threshold_boundaries(
+        array $grades,
+        int $numopen,
+        string $basis,
+        float $threshold,
+        bool $expectedbelow
+    ): void {
+        $generator = $this->getDataGenerator();
+        $category = $generator->create_category();
+        $course = $generator->create_course(['category' => $category->id, 'startdate' => $this->coursestart]);
+        $student = $generator->create_and_enrol($course, 'student');
+        $att = $this->create_attendance($course);
+        foreach ($grades as $i => $grade) {
+            $sessionid = $this->add_session($att->id, $this->coursestart + ($i + 1) * DAYSECS);
+            $this->add_log($sessionid, $student->id, $this->get_status($att->id, $grade));
+        }
+        for ($i = 1; $i <= $numopen; $i++) {
+            $this->add_session($att->id, time() + $i * DAYSECS, 0, false);
+        }
+        $category = core_course_category::get($category->id);
+
+        $report = new report($category, true, $threshold, $basis);
+        $summary = $report->get_course_summaries($course->id)[$student->id];
+        $this->assertSame($expectedbelow, $report->is_below_threshold($summary));
+        $this->assertSame(!$expectedbelow, $report->meets_threshold($summary));
+        $rows = iterator_to_array($report->get_rows(), false);
+        $this->assertEquals(get_string($expectedbelow ? 'no' : 'yes'), $rows[0]['thresholdmet']);
+
+        $report = new report($category, true, $threshold, $basis, ['belowthresholdonly' => true]);
+        $rows = iterator_to_array($report->get_rows(), false);
+        $this->assertCount($expectedbelow ? 1 : 0, $rows);
+    }
+
+    /**
+     * Participants without taken sessions are only below the threshold with the basis "all sessions" if
+     * sessions relevant to them have already taken place.
+     */
+    public function test_below_threshold_without_taken_sessions(): void {
+        $generator = $this->getDataGenerator();
+        $category = $generator->create_category();
+
+        // Course P: a past group session for group 1 and a future session for all participants.
+        $coursep = $generator->create_course([
+            'category' => $category->id,
+            'startdate' => $this->coursestart,
+            'groupmode' => SEPARATEGROUPS,
+            'shortname' => 'P',
+        ]);
+        $group1 = $generator->create_group(['courseid' => $coursep->id]);
+        $nolog = $generator->create_and_enrol($coursep, 'student', ['lastname' => 'A']);
+        $present = $generator->create_and_enrol($coursep, 'student', ['lastname' => 'B']);
+        $nogroup = $generator->create_and_enrol($coursep, 'student', ['lastname' => 'C']);
+        $generator->create_group_member(['groupid' => $group1->id, 'userid' => $nolog->id]);
+        $generator->create_group_member(['groupid' => $group1->id, 'userid' => $present->id]);
+        $att = $this->create_attendance($coursep, SEPARATEGROUPS);
+        $sessionid = $this->add_session($att->id, $this->coursestart + DAYSECS, $group1->id);
+        $this->add_log($sessionid, $present->id, $this->get_status($att->id, 2));
+        $this->add_session($att->id, time() + DAYSECS, 0, false);
+
+        // Course F: only a future session.
+        $coursef = $generator->create_course([
+            'category' => $category->id,
+            'startdate' => $this->coursestart,
+            'shortname' => 'F',
+        ]);
+        $future = $generator->create_and_enrol($coursef, 'student');
+        $attf = $this->create_attendance($coursef);
+        $this->add_session($attf->id, time() + DAYSECS, 0, false);
+
+        $category = core_course_category::get($category->id);
+
+        $summaries = (new report($category))->get_course_summaries($coursep->id);
+        $this->assertEquals(1, $summaries[$nolog->id]->numpastsessions);
+        $this->assertEquals(0, $summaries[$nogroup->id]->numpastsessions);
+        $this->assertEquals(0, (new report($category))->get_course_summaries($coursef->id)[$future->id]->numpastsessions);
+
+        // Basis "all sessions", threshold 50 %: only the participant with a past session but no log is below
+        // (the present participant has 2 of 4 points, the others no past sessions).
+        $report = new report($category, true, 50, report::BASIS_ALL, ['belowthresholdonly' => true]);
+        $rows = iterator_to_array($report->get_rows(), false);
+        $this->assertCount(1, $rows);
+        $this->assertEquals('P', $rows[0]['courseshortname']);
+        $this->assertEquals($nolog->email, $rows[0]['email']);
+
+        // Without the filter, the threshold column still reports "No" for participants without points.
+        $rows = iterator_to_array((new report($category, true, 50, report::BASIS_ALL))->get_rows(), false);
+        $thresholdmet = array_column($rows, 'thresholdmet', 'email');
+        $this->assertEquals(get_string('no'), $thresholdmet[$nogroup->email]);
+        $this->assertEquals(get_string('yes'), $thresholdmet[$present->email]);
+
+        // Basis "taken sessions": participants without taken sessions are never below the threshold.
+        $report = new report($category, true, 50, report::BASIS_TAKEN, ['belowthresholdonly' => true]);
+        $this->assertCount(0, iterator_to_array($report->get_rows(), false));
+    }
+
+    /**
+     * The filter "below threshold only" applies per course and participant.
+     */
+    public function test_below_threshold_per_row(): void {
+        $generator = $this->getDataGenerator();
+        $category = $generator->create_category();
+        $student = $generator->create_user();
+        foreach (['BELOW' => 0, 'ABOVE' => 2] as $shortname => $grade) {
+            $course = $generator->create_course([
+                'category' => $category->id,
+                'startdate' => $this->coursestart,
+                'shortname' => $shortname,
+            ]);
+            $generator->enrol_user($student->id, $course->id, 'student');
+            $att = $this->create_attendance($course);
+            $sessionid = $this->add_session($att->id, $this->coursestart + DAYSECS);
+            $this->add_log($sessionid, $student->id, $this->get_status($att->id, $grade));
+        }
+
+        $report = new report(core_course_category::get($category->id), true, 80, report::BASIS_ALL, [
+            'belowthresholdonly' => true,
+        ]);
+        $rows = iterator_to_array($report->get_rows(), false);
+        $this->assertEquals(['BELOW'], array_column($rows, 'courseshortname'));
+    }
+
+    /**
      * Data provider for {@see test_course_filters()}.
      *
      * Courses: A (2026-01-10 to 2026-06-30), B (2026-03-01, no end date), C (2026-09-01 to 2027-01-31)
@@ -411,6 +565,7 @@ final class report_test extends \advanced_testcase {
             'endfrom' => 0,
             'endto' => 0,
             'includehidden' => true,
+            'belowthresholdonly' => false,
         ], $filters);
         $this->assertNotEquals($to + DAYSECS - 1, $filters['startto']);
     }
@@ -470,6 +625,7 @@ final class report_test extends \advanced_testcase {
                 'endfrom' => 0,
                 'endto' => 1798761599,
                 'includehidden' => false,
+                'belowthresholdonly' => true,
             ],
         ])->trigger();
         $events = $sink->get_events();
@@ -483,6 +639,7 @@ final class report_test extends \advanced_testcase {
         $this->assertEquals(1767225600, $event->other['startfrom']);
         $this->assertEquals(1798761599, $event->other['endto']);
         $this->assertFalse($event->other['includehidden']);
+        $this->assertTrue($event->other['belowthresholdonly']);
         $this->assertEquals(
             new \moodle_url('/local/attendancecatexport/export.php', ['categoryid' => $category->id]),
             $event->get_url()

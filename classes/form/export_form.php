@@ -61,6 +61,10 @@ class export_form extends \moodleform {
         $mform->setDefault('basis', report::BASIS_ALL);
         $mform->addHelpButton('basis', 'basis', 'local_attendancecatexport');
 
+        $mform->addElement('advcheckbox', 'belowthresholdonly', get_string('belowthresholdonly', 'local_attendancecatexport'));
+        $mform->setDefault('belowthresholdonly', 0);
+        $mform->addHelpButton('belowthresholdonly', 'belowthresholdonly', 'local_attendancecatexport');
+
         $mform->addElement(
             'select',
             'dataformat',
@@ -106,13 +110,13 @@ class export_form extends \moodleform {
     }
 
     /**
-     * Converts the submitted form data into course filters for {@see report}.
+     * Converts the submitted form data into filters for {@see report}.
      *
      * The date selectors return midnight of the selected day; "to" dates are extended to the end of
      * that day in the user's timezone so that the whole day is included.
      *
      * @param stdClass $data Submitted form data.
-     * @return array Course filters, see {@see report::DEFAULT_FILTERS}.
+     * @return array Filters, see {@see report::DEFAULT_FILTERS}.
      */
     public static function get_filters(stdClass $data): array {
         return [
@@ -121,6 +125,7 @@ class export_form extends \moodleform {
             'endfrom' => (int) ($data->endfrom ?? 0),
             'endto' => self::end_of_day((int) ($data->endto ?? 0)),
             'includehidden' => !empty($data->includehidden),
+            'belowthresholdonly' => !empty($data->belowthresholdonly),
         ];
     }
 

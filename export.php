@@ -45,11 +45,19 @@ $PAGE->set_title($title);
 $PAGE->set_heading($category->get_formatted_name());
 
 $form = new export_form($url, ['categoryid' => $category->id]);
+$norows = false;
 
 if ($data = $form->get_data()) {
     $filters = export_form::get_filters($data);
     $report = new report($category, !empty($data->includesubcategories), (float) $data->threshold, $data->basis, $filters);
 
+    // Compute up to the first row to avoid downloading an empty file. NoRewindIterator keeps the
+    // generator from being rewound when download_data() iterates over it.
+    $rows = new NoRewindIterator($report->get_rows());
+    $norows = !$rows->valid();
+}
+
+if ($data && !$norows) {
     \local_attendancecatexport\event\report_exported::create([
         'context' => $context,
         'other' => [
@@ -64,12 +72,15 @@ if ($data = $form->get_data()) {
         'category' => $category->get_formatted_name(['escape' => false]),
         'date' => userdate(time(), '%Y-%m-%d'),
     ]));
-    \core\dataformat::download_data($filename, $data->dataformat, $report->get_columns(), $report->get_rows());
+    \core\dataformat::download_data($filename, $data->dataformat, $report->get_columns(), $rows);
     die();
 }
 
 echo $OUTPUT->header();
 echo $OUTPUT->heading($title);
+if ($norows) {
+    echo $OUTPUT->notification(get_string('norows', 'local_attendancecatexport'), \core\output\notification::NOTIFY_INFO);
+}
 echo html_writer::tag('p', get_string('exportintro', 'local_attendancecatexport'));
 $form->display();
 echo $OUTPUT->footer();

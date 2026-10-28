@@ -28,6 +28,10 @@ $string['basis'] = 'Basis für Prozentwert';
 $string['basis_all'] = 'Alle Termine';
 $string['basis_help'] = 'Welcher Prozentwert für die Spalten "Schwelle erfüllt" und "max. Punkte" verwendet wird. "Alle Termine" bezieht die Punkte auf alle Termine der Aktivität ab Kursbeginn, auch auf noch nicht erfasste (wie die Zusammenfassung "Alle Termine" im Bericht der Präsenzkontrolle). "Erfasste Termine" bezieht die Punkte nur auf bereits erfasste Termine.';
 $string['basis_taken'] = 'Erfasste Termine';
+$string['belowthresholdonly'] = 'Nur Teilnehmende unter der Schwelle exportieren';
+$string['belowthresholdonly_help'] = 'Wenn aktiviert, werden nur Zeilen (Kurs und Teilnehmer/in) exportiert, deren Prozentwert der gewählten Basis unter der Schwelle liegt. Jeder Kurs wird einzeln beurteilt.
+
+Teilnehmende ohne erfasste Termine gelten nicht als unter der Schwelle, ausser bei der Basis "Alle Termine", wenn für sie bereits Termine stattgefunden haben.';
 $string['col_category'] = 'Kursbereich';
 $string['col_coursefullname'] = 'Kurs-Vollname';
 $string['col_courseshortname'] = 'Kurs-Kurzname';
@@ -54,6 +58,7 @@ $string['exportintro'] = 'Exportiert die Anwesenheit aller Teilnehmenden für je
 $string['exportmenu'] = 'Präsenz-Export';
 $string['includehidden'] = 'Verborgene Kurse einbeziehen';
 $string['includesubcategories'] = 'Unterbereiche einbeziehen';
+$string['norows'] = 'Für die gewählten Optionen wurden keine Daten gefunden. Es wurde keine Datei erstellt.';
 $string['pluginname'] = 'Präsenz-Export Kursbereich';
 $string['privacy:metadata'] = 'Das Plugin Präsenz-Export Kursbereich speichert keine personenbezogenen Daten. Es exportiert nur Daten, die von der Präsenzkontrolle gespeichert werden.';
 $string['startfrom'] = 'Kursbeginn von';

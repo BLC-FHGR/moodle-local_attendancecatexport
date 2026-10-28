@@ -35,12 +35,32 @@ them a role with this capability in the respective course category.
    - **Include subcategories** (default: yes)
    - **Threshold (%)** (default: 80)
    - **Percentage basis**: *All sessions* (default) or *Taken sessions*
+   - **Only export participants below the threshold** (default: no, see below)
    - **Format**: Excel (xlsx), CSV or ODS (only enabled data formats are listed)
 3. Optionally restrict the courses in the **Course filters** section (see below).
 4. Click **Download**.
 
 Each download is logged with the event `\local_attendancecatexport\event\report_exported`, including
-all selected options and course filters.
+all selected options and filters.
+
+If no rows remain for the selected options, no file is downloaded. Instead, a notice is shown on the
+page (and no event is logged).
+
+### Only participants below the threshold
+
+If **Only export participants below the threshold** is checked, only rows whose percentage of the
+selected basis is below the threshold are exported.
+
+- The filter applies per row, i.e. per course and participant. A participant below the threshold in
+  one course and above it in another only appears with the first course.
+- The comparison uses the unrounded values (see *Threshold met* below).
+- **Participants without taken sessions** (no attendance recorded yet) are not considered below the
+  threshold, with one exception: with the basis *All sessions*, they are below the threshold if
+  sessions relevant to them (sessions for all participants or for one of their groups) have already
+  started. With the basis *Taken sessions* their percentage is undefined, and with only future sessions
+  there is nothing they could have missed yet.
+- This rule only affects the filter. The *Threshold met* column shows *No* for participants without
+  points, as their percentage is 0.
 
 ### Course filters
 
@@ -73,7 +93,7 @@ all selected options and course filters.
 | Max. points | Maximum points, depending on the selected basis: of all sessions (*All sessions*) or of the taken sessions only (*Taken sessions*). |
 | % taken sessions | Points / maximum points of the taken sessions, in percent (2 decimals). |
 | % all sessions | Points / maximum points of all sessions, in percent (2 decimals). |
-| Threshold met | *Yes* if the percentage of the selected basis is at least the threshold, otherwise *No*. |
+| Threshold met | *Yes* if the percentage of the selected basis is at least the threshold, otherwise *No*. The unrounded values are compared, so e.g. 66.666 % (exported as 66.67) does not meet a threshold of 66.67. |
 
 ## Calculation
 
